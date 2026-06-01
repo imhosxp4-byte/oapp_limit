@@ -14,6 +14,16 @@
     body   { background-color:#B8D9EF!important; font-family:'Sarabun','Tahoma',sans-serif; }
     .split-left  { width:58%; min-width:380px; background-color:#C5DFEF; border-right:2px solid #4BBFA8; }
     .split-right { width:42%; background-color:#D0EEE8; }
+    /* TomSelect dropdown ที่ render บน body */
+    body > .ts-dropdown {
+      z-index: 1070 !important;
+      transition: none !important;   /* ปิด fade animation ทุกชนิด */
+      animation: none !important;
+    }
+    /* ซ่อน dropdown ไว้ก่อน (ป้องกัน flash ที่ 0,0 ก่อน position จริงจะถูก set) */
+    body > .ts-dropdown.ts-pre-position {
+      visibility: hidden !important;
+    }
     .filter-bar  { background-color:#1A5276; border-bottom:3px solid #0E3858; }
     .filter-bar label, .filter-bar span { color:#fff!important; }
     #fClinic + .ts-wrapper { width:320px!important; min-width:320px!important; }
@@ -668,9 +678,23 @@ document.addEventListener('DOMContentLoaded', () => {
     searchField: ['text','value'],
     maxOptions: 500
   };
-  tsFClinic = new TomSelect('#fClinic',   tsOpts);
-  tsClinic  = new TomSelect('#clinicSel', tsOpts);
-  tsMClinic = new TomSelect('#mClinic',   tsOpts);
+  // dropdownParent:'body' — แก้ปัญหา dropdown ถูก clip โดย overflow:hidden
+  // onDropdownOpen: ซ่อน dropdown 1 frame ก่อน positionDropdown() จะทำงาน
+  // เพื่อป้องกัน flash ที่ตำแหน่ง 0,0 ก่อนกระโดดไปตำแหน่งจริง
+  function makeTS(selector, extra) {
+    return new TomSelect(selector, {
+      ...tsOpts,
+      dropdownParent: 'body',
+      onDropdownOpen(dd) {
+        dd.classList.add('ts-pre-position');
+        requestAnimationFrame(() => dd.classList.remove('ts-pre-position'));
+      },
+      ...extra
+    });
+  }
+  tsFClinic = makeTS('#fClinic');
+  tsClinic  = makeTS('#clinicSel');
+  tsMClinic = new TomSelect('#mClinic', tsOpts);  // modal ไม่ต้องการ body parent
 
   // init bulk bar state จาก server-rendered rows
   updateBulkBar();
@@ -684,7 +708,11 @@ function selectRow(tr, data) {
   tr.classList.add('row-sel');
   // Fill form with selected row data
   if (data) {
-    if (tsClinic) tsClinic.setValue(data.oapp_clinic || ''); else document.getElementById('clinicSel').value = data.oapp_clinic || '';
+    const _newClinic = data.oapp_clinic || '';
+    const _curClinic = tsClinic ? tsClinic.getValue() : document.getElementById('clinicSel').value;
+    if (_newClinic !== _curClinic) {
+      if (tsClinic) tsClinic.setValue(_newClinic); else document.getElementById('clinicSel').value = _newClinic;
+    }
     document.getElementById('limitCount').value  = data.oapp_limit  || '';
     document.getElementById('noteText').value    = data.limit_note  || '';
     if (data.oapp_date) {
@@ -1033,13 +1061,21 @@ function getSelectedIds() {
   return [...document.querySelectorAll('.row-check:checked')].map(cb => cb.dataset.id);
 }
 function updateBulkBar() {
-  const ids    = getSelectedIds();
-  const cnt    = document.getElementById('bulkCount');
-  const master = document.getElementById('masterCheck');
-  const total  = document.querySelectorAll('.row-check').length;
-  const has    = ids.length > 0;
+  const ids     = getSelectedIds();
+  const cnt     = document.getElementById('bulkCount');
+  const master  = document.getElementById('masterCheck');
+  const total   = document.querySelectorAll('.row-check').length;
+  const has     = ids.length > 0;
+  const bar     = document.getElementById('bulkBar');
+  const wasBulk = !bar.classList.contains('d-none');
+
+  // ปิด TomSelect dropdown ก่อน เพื่อป้องกันการกระพริบระหว่าง layout reflow
+  if (has !== wasBulk) {
+    [tsClinic, tsFClinic, tsMClinic].forEach(ts => { try { if (ts) ts.close(); } catch(_){} });
+  }
+
   cnt.textContent = `${ids.length} รายการที่เลือก`;
-  document.getElementById('bulkBar').classList.toggle('d-none', !has);
+  bar.classList.toggle('d-none', !has);
   // master checkbox state
   if (master) {
     master.indeterminate = has && ids.length < total;
