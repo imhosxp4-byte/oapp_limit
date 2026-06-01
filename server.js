@@ -150,43 +150,14 @@ async function verifyLogin(username, password) {
   }
 }
 
-// ── Verify connection-settings login (task 77) ──────────────────────────────
-async function verifyConnLogin(username, password) {
-  const cfg    = loadConfig();
-  const active = cfg.active || 'mysql';
-  const conn   = await openConn({ db_type: active, ...cfg });
-  try {
-    const sql1 = active === 'mysql'
-      ? 'SELECT officer_id, officer_login_password_md5 FROM officer WHERE officer_login_name = ? LIMIT 1'
-      : 'SELECT officer_id, officer_login_password_md5 FROM officer WHERE officer_login_name = $1 LIMIT 1';
-    const rows = await runQuery(conn, active, sql1, [username]);
-    if (!rows || rows.length === 0) return { ok: false, reason: 'invalid' };
+// ── Verify connection-settings login (hardcoded admin credentials) ──────────
+const CONN_USER = 'admin';
+const CONN_PASS = 'appointment';
 
-    const storedHash = (rows[0].officer_login_password_md5 || rows[0][1] || '').trim();
-    if (storedHash.toLowerCase() !== md5(password).toLowerCase())
-      return { ok: false, reason: 'invalid' };
-
-    const officerId = rows[0].officer_id ?? rows[0][0];
-    const sql2 = active === 'mysql'
-      ? `SELECT COUNT(*) AS cnt
-         FROM officer_group_task_access t
-         INNER JOIN officer_group g ON g.officer_group_id = t.officer_group_id
-         INNER JOIN officer_group_list l ON l.officer_group_id = g.officer_group_id
-         WHERE t.officer_task_id = '77' AND l.officer_id = ?`
-      : `SELECT COUNT(*) AS cnt
-         FROM officer_group_task_access t
-         INNER JOIN officer_group g ON g.officer_group_id = t.officer_group_id
-         INNER JOIN officer_group_list l ON l.officer_group_id = g.officer_group_id
-         WHERE t.officer_task_id = '77' AND l.officer_id = $1`;
-    const aRows = await runQuery(conn, active, sql2, [officerId]);
-    const cnt77 = parseInt(aRows[0]?.cnt ?? aRows[0]?.[0] ?? 0);
-    console.log(`[ConnLogin] user=${username} officer_id=${officerId} task77=${cnt77}`);
-
-    if (cnt77 === 0) return { ok: false, reason: 'no_access' };
+function verifyConnLogin(username, password) {
+  if (username === CONN_USER && password === CONN_PASS)
     return { ok: true };
-  } finally {
-    try { await conn.end(); } catch (_) {}
-  }
+  return { ok: false, reason: 'invalid' };
 }
 
 // ── Middleware ──────────────────────────────────────────────────────────────
@@ -226,23 +197,17 @@ app.post('/login', async (req, res) => {
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
 
-// ── API: Connection settings auth (task 77) ────────────────────────────────
-app.post('/api/conn-auth', async (req, res) => {
+// ── API: Connection settings auth (hardcoded admin) ───────────────────────
+app.post('/api/conn-auth', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password)
     return res.json({ ok: false, reason: 'invalid', msg: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน' });
-  try {
-    const result = await verifyConnLogin(username, password);
-    if (result.ok) {
-      req.session.connAuthed = true;
-      return res.json({ ok: true });
-    }
-    if (result.reason === 'no_access')
-      return res.json({ ok: false, reason: 'no_access' });
-    return res.json({ ok: false, reason: 'invalid', msg: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
-  } catch (e) {
-    return res.json({ ok: false, reason: 'error', msg: `เชื่อมต่อฐานข้อมูลไม่ได้: ${e.message}` });
+  const result = verifyConnLogin(username, password);
+  if (result.ok) {
+    req.session.connAuthed = true;
+    return res.json({ ok: true });
   }
+  return res.json({ ok: false, reason: 'invalid', msg: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
 });
 
 // Connection settings
